@@ -1,0 +1,8 @@
+services:
+  pubcrawl:
+    build: .
+    image: pubcrawl-nl:latest
+    container_name: pubcrawl-nl
+    ports:
+      - "8765:80"
+    restart: unless-stopped
