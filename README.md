@@ -109,8 +109,28 @@ GUINNESS_ADMIN_TOKEN=$(openssl rand -hex 16) docker compose up --build
 py -m http.server 8765
 ```
 
-Open <http://127.0.0.1:8765>. The map, filters and open-now all work; the
-Guinness UI **gracefully disables itself** when `/api/` is unreachable.
+Open <http://127.0.0.1:8765>. The map, filters, open-now and sun/shadow all work;
+the Guinness UI **gracefully disables itself** when `/api/` is unreachable. For a
+public static host that *does* run Guinness, use Cloudflare Pages (below).
+
+### Cloudflare Pages (public static site **with** working Guinness)
+
+Cloudflare Pages serves the static site and runs the Guinness API as a Pages
+Function (no server to maintain, no API keys in the client). One-time setup:
+
+```sh
+npm i -D wrangler
+npx wrangler d1 create pubcrawl-guinness          # paste the id into wrangler.toml
+npx wrangler d1 execute pubcrawl-guinness --remote --file=functions/schema.sql
+npx wrangler pages secret put VOTE_SALT           # optional: stronger IP hashing
+```
+
+Then connect the repo in the Cloudflare dashboard (**Workers & Pages → Pages →
+Connect to Git**): build command *none*, output directory `/`. The `[[d1_databases]]`
+binding in [`wrangler.toml`](wrangler.toml) wires the `DB` binding. The site
+deploys to `pubcrawl-nl.pages.dev`; `/api/guinness/*` is served same-origin, so
+the CSP and frontend need no change. (Test locally with
+`npx wrangler pages dev . --d1 DB`.)
 
 ## Re-fetching the data
 
@@ -128,10 +148,17 @@ dumps (produce them with `out center meta`).
 
 ## The Guinness backend (`/api/`)
 
-A small [FastAPI](https://fastapi.tiangolo.com/) + SQLite service
-([`backend/app.py`](backend/app.py)). nginx reverse-proxies `/api/` to it, so the
-browser stays **same-origin** and the strict CSP (`connect-src 'self'`) needs no
-change.
+Crowd-sourced votes need a server, so there are **two equivalent implementations**
+of the same `/api/guinness/*` endpoints — pick one per deployment:
+
+- **Cloudflare Pages Function** ([`functions/api/guinness/[[path]].js`](functions/api/guinness/%5B%5Bpath%5D%5D.js))
+  backed by **D1** — for hosting the public site on Cloudflare Pages (see below).
+- **FastAPI + SQLite** ([`backend/app.py`](backend/app.py)) behind nginx's `/api/`
+  reverse proxy — for the Docker deployment.
+
+Both are **same-origin** with the site, so the strict CSP (`connect-src 'self'`)
+needs no change. On a plain static host with neither (e.g. GitHub Pages), the
+frontend simply hides the Guinness UI.
 
 | Method | Path | Purpose |
 |--|--|--|
@@ -174,10 +201,14 @@ buildings. It only renders zoomed in (z15+) where footprints are available.
 │   ├── osm_common.py      # shared: de-ghost, kroeg heuristic, freshness, to_feature
 │   ├── fetch_osm.py       # re-pull from Overpass (NL area query)
 │   └── merge_raw.py       # merge pre-downloaded raw dumps
-├── backend/               # FastAPI + SQLite "serves Guinness?" service
+├── backend/               # FastAPI + SQLite "serves Guinness?" service (Docker)
 │   ├── app.py
 │   ├── requirements.txt
 │   └── Dockerfile
+├── functions/             # Cloudflare Pages Function: Guinness via D1
+│   ├── api/guinness/[[path]].js
+│   └── schema.sql
+├── wrangler.toml          # Cloudflare Pages + D1 binding
 ├── Dockerfile             # nginx:1.27-alpine (static site)
 ├── nginx.conf             # gzip, cache headers, CSP, /api/ reverse proxy
 └── docker-compose.yml     # pubcrawl (nginx) + guinness (backend) + volume

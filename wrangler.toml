@@ -1,0 +1,20 @@
+# Cloudflare Pages config for hosting the static site + the Guinness Pages Function.
+#
+# One-time setup:
+#   1. npm i -D wrangler            (or use npx wrangler ...)
+#   2. npx wrangler d1 create pubcrawl-guinness
+#      -> copy the printed database_id into `database_id` below
+#   3. npx wrangler d1 execute pubcrawl-guinness --remote --file=functions/schema.sql
+#   4. Connect this repo in the Cloudflare dashboard (Workers & Pages -> Pages ->
+#      Connect to Git). Build command: none. Output directory: / (root).
+#   5. (optional) set a secret salt: npx wrangler pages secret put VOTE_SALT
+#
+# The static site is served from the repo root and Functions live in functions/.
+name = "pubcrawl-nl"
+compatibility_date = "2024-11-01"
+pages_build_output_dir = "."
+
+[[d1_databases]]
+binding = "DB"
+database_name = "pubcrawl-guinness"
+database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"

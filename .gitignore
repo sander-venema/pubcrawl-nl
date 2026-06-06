@@ -30,4 +30,8 @@ backend/vote_salt
 # Local backend env (may hold GUINNESS_ADMIN_TOKEN)
 .env
 
+# Cloudflare Wrangler / Node
+.wrangler/
+node_modules/
+
 .claude/
