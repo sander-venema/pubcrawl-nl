@@ -4,9 +4,21 @@
         <meta charset="utf-8" />
         <title>Kroegentocht NL</title>
         <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no" />
+        <!-- CSP as a meta tag so the policy also applies on GitHub Pages, which
+             cannot send the nginx header. Mirrors nginx.conf minus frame-ancestors
+             (not supported in a meta CSP). -->
+        <meta
+            http-equiv="Content-Security-Policy"
+            content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://tiles.openfreemap.org; connect-src 'self' https://tiles.openfreemap.org; worker-src 'self' blob:; font-src 'self' data:; base-uri 'self'; form-action 'self'"
+        />
         <link href="./vendor/maplibre-gl.css" rel="stylesheet" />
         <script src="./vendor/maplibre-gl.js"></script>
         <script src="./vendor/rbush.min.js"></script>
+        <!-- opening_hours.js (LGPL-3.0) — see vendor/NOTICE.md. Used only for
+             client-side "open now" evaluation; makes no network calls. -->
+        <script src="./vendor/opening_hours.min.js"></script>
+        <!-- SunCalc (BSD-2) — sun position for the sun & shadow overlay. -->
+        <script src="./vendor/suncalc.min.js"></script>
         <style>
             body {
                 margin: 0;
@@ -55,6 +67,112 @@
             }
             .maplibregl-popup-content h3 { margin: 0 0 6px 0; font-size: 15px; }
             .maplibregl-popup-content p  { margin: 4px 0; }
+
+            /* --- filter button + panel (top-left, away from the map controls) --- */
+            #filterBtn { top: 10px; left: 10px; right: auto; }
+            #filterPanel {
+                position: absolute;
+                top: 64px;
+                left: 10px;
+                z-index: 10;
+                width: 220px;
+                background: rgba(255, 255, 255, 0.96);
+                border: 1px solid #ccc;
+                border-radius: 10px;
+                box-shadow: 0 1px 6px rgba(0, 0, 0, 0.2);
+                padding: 12px 14px;
+                font-size: 13px;
+                color: #222;
+                display: none;
+            }
+            #filterPanel.open { display: block; }
+            #filterPanel h4 { margin: 0 0 8px 0; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: #555; }
+            #filterPanel .group { margin-bottom: 10px; }
+            #filterPanel label {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                padding: 3px 0;
+                cursor: pointer;
+                user-select: none;
+            }
+            #filterPanel input[type="checkbox"] { accent-color: #035690; width: 15px; height: 15px; cursor: pointer; }
+            #filterPanel .hint { color: #777; font-size: 11px; margin: 2px 0 0 0; }
+            #filterPanel hr { border: none; border-top: 1px solid #eee; margin: 10px 0; }
+            #filterPanel.no-guinness .guinness-only { display: none; }
+
+            .legend-row { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
+            .legend-dot { width: 12px; height: 12px; border-radius: 50%; flex: none; border: 1px solid rgba(0,0,0,0.15); }
+            .legend-open    { background: #2e8b57; }
+            .legend-closed  { background: #b25b5b; }
+            .legend-unknown { background: #b9b9ae; }
+
+            #filterCount { color: #555; font-size: 11px; margin-top: 8px; }
+            #nearestLbl { font-weight: 600; margin-bottom: 4px; }
+            #nearestSlider { width: 100%; accent-color: #035690; cursor: pointer; }
+
+            /* --- popup: open-now badge, stale note, Guinness voting --- */
+            .pc-badge { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 11px; font-weight: 600; color: #fff; }
+            .pc-badge.open    { background: #2e8b57; }
+            .pc-badge.closed  { background: #b25b5b; }
+            .pc-badge.unknown { background: #9a9a8e; }
+            .pc-stale { color: #9a6a00; font-size: 11px; margin: 4px 0; }
+            .guinness {
+                margin-top: 8px;
+                padding-top: 8px;
+                border-top: 1px solid #eee;
+            }
+            .guinness .g-counts { font-size: 12px; color: #444; margin: 0 0 6px 0; }
+            .guinness .g-buttons { display: flex; gap: 6px; }
+            .guinness button {
+                flex: 1;
+                border: 1px solid #ccc;
+                border-radius: 6px;
+                background: #f7f7f4;
+                padding: 5px 0;
+                font: inherit;
+                font-size: 12px;
+                cursor: pointer;
+            }
+            .guinness button:hover { background: #ececdf; }
+            .guinness button.sel { border-color: #035690; background: #e2eef6; font-weight: 600; }
+            .guinness button[disabled] { opacity: 0.5; cursor: default; }
+
+            /* --- sun & shadow toggle + time panel --- */
+            #sunBtn { top: 238px; }
+            #sunBtn.active { background-color: #ffd24d; border-color: #e0b020; }
+            #sunPanel {
+                position: absolute;
+                left: 50%;
+                bottom: 24px;
+                transform: translateX(-50%);
+                z-index: 10;
+                width: min(360px, calc(100% - 32px));
+                background: rgba(255, 255, 255, 0.96);
+                border: 1px solid #ccc;
+                border-radius: 10px;
+                box-shadow: 0 1px 6px rgba(0, 0, 0, 0.2);
+                padding: 10px 14px;
+                font-size: 13px;
+                color: #222;
+                display: none;
+            }
+            #sunPanel.open { display: block; }
+            #sunPanel .sun-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+            #sunTime { font-weight: 600; }
+            #sunNowBtn {
+                border: 1px solid #ccc;
+                border-radius: 6px;
+                background: #f7f7f4;
+                padding: 3px 10px;
+                font: inherit;
+                font-size: 12px;
+                cursor: pointer;
+            }
+            #sunNowBtn:hover { background: #ececdf; }
+            #sunNowBtn.live { border-color: #2e8b57; background: #e4f3ea; color: #1f6b41; font-weight: 600; }
+            #sunSlider { width: 100%; accent-color: #e0b020; cursor: pointer; }
+            #sunStatus { color: #777; font-size: 11px; min-height: 14px; margin-top: 4px; }
         </style>
     </head>
     <body>
@@ -80,6 +198,59 @@
             </svg>
         </button>
         <button id="langBtn" class="ctrl-btn" title="Switch language">EN</button>
+
+        <button id="filterBtn" class="ctrl-btn" title="Filters">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#222" stroke-width="2" stroke-linecap="round">
+                <line x1="3" y1="6" x2="21" y2="6" /><circle cx="9" cy="6" r="2.4" fill="#fff" />
+                <line x1="3" y1="12" x2="21" y2="12" /><circle cx="15" cy="12" r="2.4" fill="#fff" />
+                <line x1="3" y1="18" x2="21" y2="18" /><circle cx="8" cy="18" r="2.4" fill="#fff" />
+            </svg>
+        </button>
+        <button id="sunBtn" class="ctrl-btn" title="Zon &amp; schaduw">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#222" stroke-width="2" stroke-linecap="round">
+                <circle cx="12" cy="12" r="4.5" />
+                <line x1="12" y1="2" x2="12" y2="4.5" /><line x1="12" y1="19.5" x2="12" y2="22" />
+                <line x1="2" y1="12" x2="4.5" y2="12" /><line x1="19.5" y1="12" x2="22" y2="12" />
+                <line x1="4.9" y1="4.9" x2="6.7" y2="6.7" /><line x1="17.3" y1="17.3" x2="19.1" y2="19.1" />
+                <line x1="19.1" y1="4.9" x2="17.3" y2="6.7" /><line x1="6.7" y1="17.3" x2="4.9" y2="19.1" />
+            </svg>
+        </button>
+
+        <div id="sunPanel" role="region">
+            <div class="sun-top">
+                <span id="sunTime">—</span>
+                <button id="sunNowBtn">Nu</button>
+            </div>
+            <input type="range" id="sunSlider" min="0" max="1439" step="5" value="720" />
+            <div id="sunStatus"></div>
+        </div>
+
+        <div id="filterPanel" role="region">
+            <h4 id="fltTitle">Filters</h4>
+            <div class="group" id="fltNearest">
+                <div id="nearestLbl">Dichtstbijzijnde: 5</div>
+                <input type="range" id="nearestSlider" min="1" max="10" step="1" value="5" />
+            </div>
+            <hr />
+            <div class="group" id="fltTypes">
+                <label><input type="checkbox" data-type="pub" checked /> <span data-i18n="pub">Kroeg</span></label>
+                <label><input type="checkbox" data-type="bar" checked /> <span data-i18n="bar">Bar</span></label>
+                <label><input type="checkbox" data-type="cafe" checked /> <span data-i18n="cafe">Café</span></label>
+            </div>
+            <hr />
+            <div class="group">
+                <label><input type="checkbox" id="fltOpenNow" /> <span id="fltOpenNowLbl">Nu open</span></label>
+                <label class="guinness-only"><input type="checkbox" id="fltGuinness" /> <span id="fltGuinnessLbl">Serveert Guinness</span></label>
+                <label><input type="checkbox" id="fltHideStale" /> <span id="fltHideStaleLbl">Verberg mogelijk verouderd</span></label>
+            </div>
+            <hr />
+            <div class="group" id="fltLegend">
+                <div class="legend-row"><span class="legend-dot legend-open"></span><span id="lgOpen">Nu open</span></div>
+                <div class="legend-row"><span class="legend-dot legend-closed"></span><span id="lgClosed">Gesloten</span></div>
+                <div class="legend-row"><span class="legend-dot legend-unknown"></span><span id="lgUnknown">Onbekend</span></div>
+            </div>
+            <div id="filterCount"></div>
+        </div>
 
         <script src="./js/crawl.js"></script>
     </body>

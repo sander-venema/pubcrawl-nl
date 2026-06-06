@@ -1,15 +1,21 @@
-"""Fetch pubs, bars and cafes for the Netherlands from the Overpass API
+"""Fetch Dutch "kroegen" (pubs, bars and drinking cafés) from the Overpass API
 and write them out as a GeoJSON FeatureCollection at data/kroegen-pts.json.
 
 Run from the project root:
     python scripts/fetch_osm.py
 
-The query is split by amenity type because a combined query exceeds the
-public Overpass proxy timeout (~60s). Per-amenity queries each finish in
-30-50 seconds.
+What this does differently from a naive amenity dump:
+  * Queries the Netherlands ADMINISTRATIVE AREA (ISO3166-1=NL), not a loose
+    bounding box, so it no longer drags in Belgian/German border venues.
+  * Uses "out center meta" to capture each venue's last-edit timestamp, which
+    (with check_date tags) drives a per-venue "stale" flag.
+  * Drops closed venues (lifecycle-prefixed amenity tags / opening_hours off).
+  * Keeps every pub and bar, but only the amenity=cafe entries that look like a
+    kroeg / bruin café (see scripts/osm_common.is_kroeg).
 
-The request mimics overpass-turbo.eu (Referer header) because the public
-Overpass front-end blocks requests that look like generic bots.
+The query is split per amenity because a combined area query can exceed the
+public Overpass proxy timeout. The request mimics overpass-turbo.eu (Referer
+header) because the public front-end blocks requests that look like generic bots.
 """
 
 from __future__ import annotations
@@ -20,14 +26,18 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections import Counter
+from datetime import datetime, timezone
 from pathlib import Path
 
-# Netherlands bbox: south, west, north, east. Includes a small margin around mainland NL.
-NL_BBOX = (50.70, 3.30, 53.60, 7.30)
-
-AMENITIES = ("pub", "bar", "cafe")
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from osm_common import VENUE_AMENITIES, is_kroeg, to_feature  # noqa: E402
 
 ENDPOINT = "https://overpass-api.de/api/interpreter"
+
+# Abort rather than overwrite the committed snapshot if a query returns far
+# fewer venues than expected (e.g. the NL area failed to resolve).
+MIN_EXPECTED_FEATURES = 5000
 
 HEADERS = {
     "User-Agent": (
@@ -39,30 +49,14 @@ HEADERS = {
     "Origin": "https://overpass-turbo.eu",
 }
 
-KEEP_PROPS = (
-    "name",
-    "amenity",
-    "website",
-    "contact:website",
-    "opening_hours",
-    "outdoor_seating",
-    "wheelchair",
-    "addr:city",
-    "addr:street",
-    "addr:housenumber",
-    "addr:postcode",
-    "cuisine",
-    "brewery",
-    "microbrewery",
-)
-
 
 def query_for(amenity: str) -> str:
-    s, w, n, e = NL_BBOX
+    # area(...) resolves the NL country relation; nwr = node/way/relation.
     return (
-        f"[out:json][timeout:90][bbox:{s},{w},{n},{e}];"
-        f'(node["amenity"="{amenity}"];way["amenity"="{amenity}"];);'
-        f"out center tags;"
+        "[out:json][timeout:180];"
+        'area["ISO3166-1"="NL"]["admin_level"="2"]->.nl;'
+        f'nwr["amenity"="{amenity}"](area.nl);'
+        "out center meta;"
     )
 
 
@@ -73,60 +67,55 @@ def fetch(amenity: str) -> dict:
         print(f"-> {amenity}: attempt {attempt}", file=sys.stderr)
         req = urllib.request.Request(ENDPOINT, data=body, headers=HEADERS)
         try:
-            with urllib.request.urlopen(req, timeout=180) as resp:
+            with urllib.request.urlopen(req, timeout=240) as resp:
                 payload = resp.read()
                 print(f"   ok, {len(payload):,} bytes", file=sys.stderr)
                 return json.loads(payload)
         except (urllib.error.URLError, TimeoutError, OSError, ConnectionError) as exc:
             print(f"   failed: {exc}", file=sys.stderr)
             last_err = exc
-            time.sleep(5)
+            time.sleep(8)
     raise SystemExit(f"Overpass failed for {amenity}: {last_err}")
 
 
-def to_feature(element: dict) -> dict | None:
-    tags = element.get("tags") or {}
-    if not tags.get("name"):
-        return None
-
-    if element["type"] == "node":
-        lon, lat = element.get("lon"), element.get("lat")
-    else:
-        center = element.get("center") or {}
-        lon, lat = center.get("lon"), center.get("lat")
-
-    if lon is None or lat is None:
-        return None
-
-    props = {key: tags[key] for key in KEEP_PROPS if key in tags}
-    if "contact:website" in props and "website" not in props:
-        props["website"] = props.pop("contact:website")
-
-    return {
-        "type": "Feature",
-        "id": f"{element['type']}/{element['id']}",
-        "properties": props,
-        "geometry": {"type": "Point", "coordinates": [round(lon, 6), round(lat, 6)]},
-    }
-
-
 def main() -> None:
+    today = datetime.now(timezone.utc).date()
     all_features: list[dict] = []
     seen_ids: set[str] = set()
+    cafe_seen = cafe_kept = 0
 
-    for amenity in AMENITIES:
+    for amenity in VENUE_AMENITIES:
         raw = fetch(amenity)
         elements = raw.get("elements", [])
         kept = 0
         for el in elements:
-            feature = to_feature(el)
+            if amenity == "cafe":
+                cafe_seen += 1
+            feature = to_feature(el, today)
             if feature is None or feature["id"] in seen_ids:
                 continue
             seen_ids.add(feature["id"])
             all_features.append(feature)
             kept += 1
-        print(f"   {amenity}: {len(elements):,} elements -> {kept:,} features", file=sys.stderr)
+            if amenity == "cafe":
+                cafe_kept += 1
+        print(f"   {amenity}: {len(elements):,} elements -> {kept:,} kept", file=sys.stderr)
 
+    if cafe_seen:
+        print(
+            f"-> café heuristic: kept {cafe_kept:,} of {cafe_seen:,} cafés as kroegen "
+            f"({cafe_seen - cafe_kept:,} dropped as coffee/food-only)",
+            file=sys.stderr,
+        )
+
+    if len(all_features) < MIN_EXPECTED_FEATURES:
+        raise SystemExit(
+            f"Only {len(all_features):,} venues parsed (< {MIN_EXPECTED_FEATURES:,}); "
+            "refusing to overwrite the existing snapshot. Check the NL area query."
+        )
+
+    stale = sum(1 for f in all_features if f["properties"].get("stale"))
+    with_hours = sum(1 for f in all_features if f["properties"].get("opening_hours"))
     fc = {
         "type": "FeatureCollection",
         "generator": "scripts/fetch_osm.py",
@@ -139,8 +128,8 @@ def main() -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(fc, ensure_ascii=False), encoding="utf-8")
     print(
-        f"-> wrote {out_path} ({out_path.stat().st_size:,} bytes, "
-        f"{len(all_features):,} features)",
+        f"-> wrote {out_path} ({out_path.stat().st_size:,} bytes, {len(all_features):,} venues; "
+        f"{with_hours:,} with hours, {stale:,} flagged stale)",
         file=sys.stderr,
     )
 

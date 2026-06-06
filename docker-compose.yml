@@ -5,4 +5,25 @@ services:
     container_name: pubcrawl-nl
     ports:
       - "8765:80"
+    depends_on:
+      - guinness
     restart: unless-stopped
+
+  # Crowd-sourced "serves Guinness?" backend. Internal only — reachable solely
+  # through nginx's /api/ reverse proxy, so the browser stays same-origin and the
+  # site's strict CSP (connect-src 'self') needs no change.
+  guinness:
+    build: ./backend
+    image: pubcrawl-nl-guinness:latest
+    container_name: pubcrawl-nl-guinness
+    expose:
+      - "8000"
+    environment:
+      # Set GUINNESS_ADMIN_TOKEN in your shell/.env to enable /api/admin/* moderation.
+      - ADMIN_TOKEN=${GUINNESS_ADMIN_TOKEN:-}
+    volumes:
+      - guinness-data:/data
+    restart: unless-stopped
+
+volumes:
+  guinness-data:

@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+*.db
+*.db-wal
+*.db-shm
+vote_salt
