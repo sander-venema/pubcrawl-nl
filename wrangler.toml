@@ -1,20 +1,24 @@
-# Cloudflare Pages config for hosting the static site + the Guinness Pages Function.
+# Cloudflare Pages config (static site at the repo root + the Guinness Pages Function).
 #
-# One-time setup:
-#   1. npm i -D wrangler            (or use npx wrangler ...)
-#   2. npx wrangler d1 create pubcrawl-guinness
-#      -> copy the printed database_id into `database_id` below
-#   3. npx wrangler d1 execute pubcrawl-guinness --remote --file=functions/schema.sql
-#   4. Connect this repo in the Cloudflare dashboard (Workers & Pages -> Pages ->
-#      Connect to Git). Build command: none. Output directory: / (root).
-#   5. (optional) set a secret salt: npx wrangler pages secret put VOTE_SALT
-#
-# The static site is served from the repo root and Functions live in functions/.
+# IMPORTANT: this is a *Pages* project, so the deploy command must be
+#   npx wrangler pages deploy .
+# NOT `npx wrangler deploy` (that's the Workers command and will fail with
+# "Missing entry-point"). If the Cloudflare build runs `wrangler deploy`, change
+# the project's Deploy command to `npx wrangler pages deploy .` (build command
+# empty, output directory: /).
 name = "pubcrawl-nl"
 compatibility_date = "2024-11-01"
 pages_build_output_dir = "."
 
-[[d1_databases]]
-binding = "DB"
-database_name = "pubcrawl-guinness"
-database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+# D1 binding: set this in the Cloudflare dashboard instead — Pages project ->
+# Settings -> Functions -> D1 database bindings -> Variable name "DB" -> your
+# "pubcrawl-guinness" database. (Dashboard bindings are the canonical way for
+# Pages and avoid committing a database_id.) For local dev use:
+#   npx wrangler pages dev . --d1 DB
+# The votes table is created automatically on first use, so running
+# functions/schema.sql is optional.
+#
+# [[d1_databases]]
+# binding = "DB"
+# database_name = "pubcrawl-guinness"
+# database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"

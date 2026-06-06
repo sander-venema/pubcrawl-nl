@@ -116,21 +116,24 @@ public static host that *does* run Guinness, use Cloudflare Pages (below).
 ### Cloudflare Pages (public static site **with** working Guinness)
 
 Cloudflare Pages serves the static site and runs the Guinness API as a Pages
-Function (no server to maintain, no API keys in the client). One-time setup:
+Function backed by D1 (no server to maintain, no API keys in the client).
 
-```sh
-npm i -D wrangler
-npx wrangler d1 create pubcrawl-guinness          # paste the id into wrangler.toml
-npx wrangler d1 execute pubcrawl-guinness --remote --file=functions/schema.sql
-npx wrangler pages secret put VOTE_SALT           # optional: stronger IP hashing
-```
+1. **Connect the repo**: Cloudflare dashboard → **Workers & Pages → Create →
+   Pages → Connect to Git** → pick this repo.
+2. **Build settings**: build command *empty*, output directory `/`. If the project
+   shows a **Deploy command**, set it to `npx wrangler pages deploy .` — **not**
+   `npx wrangler deploy` (the Workers command; it fails with "Missing entry-point"
+   because this is a Pages project).
+3. **Create a D1 database** named `pubcrawl-guinness` (dashboard → Storage &
+   Databases → D1, or `npx wrangler d1 create pubcrawl-guinness`).
+4. **Bind it**: project → **Settings → Functions → D1 database bindings** → add
+   variable **`DB`** → `pubcrawl-guinness`, then re-deploy.
+5. *(optional)* stronger IP hashing: `npx wrangler pages secret put VOTE_SALT`.
 
-Then connect the repo in the Cloudflare dashboard (**Workers & Pages → Pages →
-Connect to Git**): build command *none*, output directory `/`. The `[[d1_databases]]`
-binding in [`wrangler.toml`](wrangler.toml) wires the `DB` binding. The site
-deploys to `pubcrawl-nl.pages.dev`; `/api/guinness/*` is served same-origin, so
-the CSP and frontend need no change. (Test locally with
-`npx wrangler pages dev . --d1 DB`.)
+The site deploys to `pubcrawl-nl.pages.dev`; `/api/guinness/*` is same-origin, so
+the CSP and frontend need no change. The votes table is created automatically on
+first use (running `functions/schema.sql` is optional). Test locally with
+`npx wrangler pages dev . --d1 DB`.
 
 ## Re-fetching the data
 
